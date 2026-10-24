@@ -18,7 +18,6 @@ EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
 TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 DB_PATH = "threads_flower_leads.db"
-MAX_AGE_MINUTES = 30  # Chỉ lấy bài viết mới từ 1 phút đến tối đa 30 phút đổ lại
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -55,41 +54,55 @@ def save_lead(post_id: str, username: str, post_text: str, permalink: str, draft
     conn.commit()
     conn.close()
 
+# =====================================================================
+# BỘ TỪ KHÓA KHOANH VÙNG ĐỘC QUYỀN TP. HỒ CHÍ MINH / SÀI GÒN
+# =====================================================================
 SEARCH_QUERIES = [
-    "cần đặt hoa gấp",
-    "sốp nào còn thức",
     "Hoa Tuoi Saigon",
-    "cần đặt hoa",
-    "shop nào sẵn hoa",
-    "sốp nào sẵn hoa",
-    "cần hoa gấp",
     "đặt hoa sài gòn",
     "đặt hoa hcm",
-    "sẵn hoa",
-    "hoa gấp",
+    "cần hoa gấp tối nay",
+    "cần hoa gấp hcm",
     "hoa tốt nghiệp",
-    "sale hoa",
-    "hoa ly",
-    "hoa hồng",
-    "hoa cưới",
-    "rcm shop hoa",
-    "tìm tiệm hoa"
+    "hoa tốt nghiệp hcm",
+    "shop nào sẵn hoa sài gòn",
+    "sốp nào sẵn hoa sài gòn",
+    "sẵn hoa sài gòn",
+    "sẵn hoa hcm",
+    "hoa gấp sài gòn",
+    "sale hoa sài gòn",
+    "hoa cưới sài gòn",
+    "hoa hồng sài gòn",
+    "hoa ly sài gòn",
+    "rcm shop hoa sài gòn",
+    "tìm tiệm hoa sài gòn"
 ]
 
-NON_HCM_BLACKLIST = [
-    "hà nội", "hanoi", "cầu giấy", "đống đa", "hoàn kiếm", "tây hồ", "thanh xuân",
-    "hai bà trưng", "long biên", "hà đông", "ba đình", "cầu diễn", "đà nẵng", "hải phòng",
+# Từ khóa loại trừ 100% các tỉnh thành khác trên cả nước
+OTHER_PROVINCES_BLACKLIST = [
+    "hà nội", "hanoi", "hn", "cầu giấy", "đống đa", "hoàn kiếm", "tây hồ", "thanh xuân",
+    "hai bà trưng", "long biên", "hà đông", "ba đình", "cầu diễn", "mỹ đình", "gia lâm",
+    "đà nẵng", "hải phòng", "cần thơ", "nha trang", "đà lạt", "vũng tàu", "biên hòa",
+    "đồng nai", "bình dương", "huế", "quy nhơn", "vinh", "nghệ an", "thanh hóa",
+    "bắc ninh", "hải dương", "quảng ninh", "hạ long", "buôn ma thuột", "rạch giá"
+]
+
+# Các câu rao bán đặc trưng của chủ shop hoa (để loại bỏ shop đối thủ)
+SELLER_BLACKLIST = [
     "nhận đặt hoa", "bên mình nhận", "tuyển thợ cắm hoa", "sỉ hoa", "tuyển nhân viên",
-    "mình sẵn hoa", "em sẵn hoa", "nhà em sẵn", "shop em sẵn", "shop sẵn"
+    "mình sẵn hoa", "em sẵn hoa", "nhà em sẵn", "shop em sẵn", "shop sẵn", "sẵn sale",
+    "sẵn tại sốp", "ship liền tay", "bác nào đang cần hoa nhắn", "ib ngay cho tiệm",
+    "bọn em bán hoa", "bơi vào đây với shop"
 ]
 
-HCM_SIGNALS = [
-    "hcm", "tphcm", "sài gòn", "saigon", "sg", "thủ đức", "thảo điền",
-    "bình thạnh", "phú nhuận", "tân bình", "tân phú", "gò vấp", "bình tân",
-    "quận 1", "quận 2", "quận 3", "quận 4", "quận 5", "quận 6", "quận 7",
-    "quận 8", "quận 9", "quận 10", "quận 11", "quận 12", "q1", "q2", "q3",
-    "q4", "q5", "q6", "q7", "q8", "q9", "q10", "q11", "q12",
-    "nhà bè", "hóc môn", "bình chánh", "hồ thị kỷ", "sốp nào", "shop nào", "bông"
+# BẮT BUỘC bài viết hoặc Topic phải chứa ít nhất 1 trong các từ khóa địa danh TP.HCM này
+HCM_REQUIRED_SIGNALS = [
+    "hcm", "tphcm", "tp.hcm", "tp hcm", "hồ chí minh", "sài gòn", "saigon", "sg",
+    "thủ đức", "thảo điền", "bình thạnh", "phú nhuận", "tân bình", "tân phú",
+    "gò vấp", "bình tân", "quận 1", "quận 2", "quận 3", "quận 4", "quận 5",
+    "quận 6", "quận 7", "quận 8", "quận 9", "quận 10", "quận 11", "quận 12",
+    "q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10", "q11", "q12",
+    "nhà bè", "hóc môn", "bình chánh", "củ chi", "hồ thị kỷ", "đầm sen", "bến thành"
 ]
 
 def build_cross_domain_storage() -> str | None:
@@ -119,114 +132,106 @@ def build_cross_domain_storage() -> str | None:
         print(f"[!] Lỗi xử lý session: {e}")
         return "threads_session.json"
 
-def is_within_30_minutes(raw_text: str) -> tuple[bool, str]:
+def check_post_freshness(raw_text: str) -> tuple[bool, str, int]:
     """
-    Bộ lọc Nghiêm ngặt: CHỈ CHẤP NHẬN bài viết vừa đăng từ 1 giây đến tối đa 30 phút trước.
-    Loại bỏ 100% bài tính bằng giờ (h/giờ), ngày (d/ngày), tuần, hoặc ngày tháng (dd/mm/yyyy).
+    Trả về (is_fresh, label, age_in_minutes).
+    - Ưu tiên số 1: Bài từ 1 - 30 phút (age_in_minutes <= 30).
+    - Chấp nhận bài trong ngày hôm nay (<= 18 giờ) nếu Threads chưa mở tab Recent, nhưng loại sạch bài từ nhiều ngày trước.
     """
     lines = [l.strip().lower() for l in raw_text.splitlines() if l.strip()]
     for line in lines[:6]:
-        # 1. Nếu là vừa xong hoặc tính bằng giây -> ĐẠT NGAY
         if line in ["vừa xong", "now", "just now"] or re.match(r"^(\d+)\s*(giây|s)$", line):
-            return True, f"Vừa đăng ({line})"
+            return True, f"Vừa đăng ({line})", 1
 
-        # 2. Nếu tính bằng phút -> Chỉ nhận từ 1 đến 30 phút
         m_min = re.match(r"^(\d+)\s*(phút|m)$", line)
         if m_min:
             mins = int(m_min.group(1))
-            if mins <= MAX_AGE_MINUTES:
-                return True, f"{mins} phút trước"
-            else:
-                return False, f"Quá 30 phút ({mins} phút trước)"
+            return (mins <= 30), f"{mins} phút trước", mins
 
-        # 3. Nếu tính bằng giờ, ngày, tuần, hoặc ngày/tháng/năm -> LOẠI NGAY LẬP TỨC
-        if re.match(r"^(\d+)\s*(giờ|h|ngày|d|tuần|w|tháng|năm)$", line):
-            return False, f"Bài cũ ({line})"
+        m_hour = re.match(r"^(\d+)\s*(giờ|h)$", line)
+        if m_hour:
+            hours = int(m_hour.group(1))
+            # Nếu quá 16 giờ hoặc thuộc ngày cũ -> Loại
+            return (hours <= 16), f"{hours} giờ trước", hours * 60
+
+        if re.match(r"^(\d+)\s*(ngày|d|tuần|w|tháng|năm)$", line):
+            return False, f"Bài cũ ({line})", 99999
         if re.search(r"\b\d{1,2}/\d{1,2}(/\d{2,4})?\b", line):
-            return False, f"Bài cũ ({line})"
+            return False, f"Bài cũ ({line})", 99999
 
-    return False, "Không rõ mốc thời gian mới"
+    return False, "Không rõ thời gian", 99999
 
-def fallback_rule_evaluation(post_text: str, has_hcm_kw: bool) -> dict:
+def evaluate_hcm_flower_lead(post_text: str) -> dict:
+    """
+    Bộ lọc Khoanh vùng Nghiêm ngặt TP.HCM / Sài Gòn:
+    1. Loại thẳng nếu nhắc đến bất kỳ tỉnh thành nào khác.
+    2. BẮT BUỘC trong bài hoặc Topic phải có từ khóa địa điểm TP.HCM / Sài Gòn.
+    3. Phân biệt chính xác Khách hỏi mua vs Shop rao bán.
+    """
     t = post_text.lower()
-    seller_patterns = [
-        "100k", "120k", "150k", "159k", "200k", "380", "ib ngay",
-        "nhắn sốp nha", "sẵn ạ", "freeship", "đang có sẵn tại sốp", "bọn em bán hoa"
-    ]
-    if any(sp in t for sp in seller_patterns):
-        return {
-            "is_buyer_seeking_flowers": False,
-            "location_verdict": "SELLER",
-            "confidence_score": 0.0,
-            "reasoning": "Bài rao bán hoa của shop",
-            "suggested_comment": ""
-        }
 
-    buyer_patterns = [
-        "cần đặt hoa", "cần hoa gấp", "sốp nào", "shop nào", "tiệm nào",
-        "có ai", "cho mình hỏi", "cho em hỏi", "tìm shop", "tìm tiệm",
-        "rcm", "recommend", "còn thức không", "chỗ nào bán", "mua ở đâu", "hoa gấp"
-    ]
-    if any(bp in t for bp in buyer_patterns):
-        return {
-            "is_buyer_seeking_flowers": True,
-            "location_verdict": "CONFIRMED_HCM" if has_hcm_kw else "LIKELY_HCM",
-            "confidence_score": 0.90,
-            "reasoning": "Khách đang hỏi tìm shop đặt hoa mới tức thì",
-            "suggested_comment": "Dạ tiệm tụi mình ở Sài Gòn vẫn đang trực nhận đơn hoa gấp và có sẵn nhiều mẫu hoa tươi xinh lắm ạ. Bạn nhắn tụi mình tư vấn liền nha! 🌸"
-        }
-
-    return {
-        "is_buyer_seeking_flowers": False,
-        "location_verdict": "UNKNOWN",
-        "confidence_score": 0.2,
-        "reasoning": "Không phải câu hỏi tìm mua hoa",
-        "suggested_comment": ""
-    }
-
-async def analyze_post_with_ai(post_text: str, username: str, query_used: str) -> dict:
-    text_lower = post_text.lower()
-    for bad in NON_HCM_BLACKLIST:
-        if bad in text_lower:
+    # 1. Kiểm tra tỉnh thành khác -> Loại ngay lập tức
+    for prov in OTHER_PROVINCES_BLACKLIST:
+        if re.search(rf"\b{re.escape(prov)}\b", t):
             return {
-                "is_buyer_seeking_flowers": False,
-                "location_verdict": "BLACKLISTED",
-                "confidence_score": 0.0,
-                "reasoning": f"Loại trừ từ khóa: '{bad}'",
-                "suggested_comment": ""
+                "is_buyer": False,
+                "reason": f"Thuộc tỉnh/thành khác ({prov})"
             }
 
-    has_hcm_kw = (
-        any(sig in text_lower for sig in HCM_SIGNALS)
-        or ("saigon" in query_used.lower())
-        or ("sài gòn" in query_used.lower())
-        or ("hcm" in query_used.lower())
-    )
+    # 2. Kiểm tra BẮT BUỘC phải có địa danh Sài Gòn / TP.HCM / Quận Huyện HCM
+    matched_hcm = None
+    for sig in HCM_REQUIRED_SIGNALS:
+        if re.search(rf"\b{re.escape(sig)}\b", t):
+            matched_hcm = sig
+            break
 
-    prompt = f"""
-Phân tích bài đăng Threads dưới đây và trả về JSON:
-- Người đăng: @{username}
-- Từ khóa: {query_used}
-- Nội dung: {post_text}
+    if not matched_hcm:
+        return {
+            "is_buyer": False,
+            "reason": "Không ghi địa điểm tại TP.HCM / Sài Gòn"
+        }
 
-Trả về đúng định dạng JSON:
-{{"is_buyer_seeking_flowers": true/false, "location_verdict": "CONFIRMED_HCM" hoặc "LIKELY_HCM" hoặc "OUTSIDE", "confidence_score": 0.9, "reasoning": "lý do ngắn gọn", "suggested_comment": "câu trả lời dưới 220 ký tự"}}
-"""
-    api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={OPENAI_API_KEY}"
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
+    # 3. Kiểm tra xem có phải bài rao bán của Shop hoa khác không
+    for seller_kw in SELLER_BLACKLIST:
+        if seller_kw in t:
+            return {
+                "is_buyer": False,
+                "reason": f"Bài quảng cáo của shop hoa ('{seller_kw}')"
+            }
+
+    # Nếu có báo giá tiền cụ thể kèm từ rao bán (100k, 150k, 159k...) mà không có dấu chấm hỏi -> Là shop bán
+    if re.search(r"\b\d{2,3}k\b", t) and "?" not in t and "không" not in t and "tìm" not in t:
+        return {
+            "is_buyer": False,
+            "reason": "Shop đăng báo giá bán hoa"
+        }
+
+    # 4. Kiểm tra các mẫu câu KHÁCH HÀNG ĐANG HỎI MUA / TÌM SHOP tại TP.HCM
+    buyer_signals = [
+        "cần đặt hoa", "cần hoa gấp", "cần tìm hoa", "đặt hoa gấp",
+        "sốp nào", "shop nào", "tiệm nào", "chỗ nào", "ở đâu",
+        "có ai sale hoa", "có ai bán", "có ai nhận", "có shop nào",
+        "cho mình hỏi", "cho em hỏi", "tìm shop", "tìm tiệm",
+        "rcm", "recommend", "còn thức không", "sẵn hoa không",
+        "cần mua hoa", "mua hoa tốt nghiệp", "đặt hoa tốt nghiệp", "hoa cưới"
+    ]
+
+    for bs in buyer_signals:
+        if bs in t:
+            return {
+                "is_buyer": True,
+                "hcm_location": matched_hcm.upper(),
+                "reason": f"Khách tại [{matched_hcm.upper()}] đang hỏi mua hoa ('{bs}')",
+                "suggested_comment": (
+                    "Dạ tiệm tụi mình ở Sài Gòn đang có sẵn nhiều mẫu hoa tươi xinh lắm và nhận giao gấp liền trong ngày ạ. "
+                    "Bạn nhắn tụi mình gửi mẫu cho bạn chọn nha! 🌸"
+                )
+            }
+
+    return {
+        "is_buyer": False,
+        "reason": "Bài cảm thán/tâm sự, không có câu hỏi tìm mua hoa"
     }
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(api_url, json=payload)
-            if resp.status_code != 200:
-                return fallback_rule_evaluation(post_text, has_hcm_kw)
-            data = resp.json()
-            raw_json = data["candidates"][0]["content"]["parts"][0]["text"]
-            return json.loads(raw_json)
-    except Exception:
-        return fallback_rule_evaluation(post_text, has_hcm_kw)
 
 async def send_telegram_alert(username: str, post_text: str, permalink: str, draft_comment: str, query_used: str, reasoning: str, time_label: str):
     safe_user = html.escape(username)
@@ -236,11 +241,11 @@ async def send_telegram_alert(username: str, post_text: str, permalink: str, dra
     safe_query = html.escape(query_used)
 
     msg = (
-        f"🌸 <b>PHÁT HIỆN KHÁCH ĐẶT HOA MỚI ({html.escape(time_label)})!</b>\n"
-        f"🔎 <b>Nguồn quét:</b> <code>{safe_query}</code>\n"
+        f"🌸 <b>KHÁCH TÌM HOA TẠI TP.HCM ({html.escape(time_label)})!</b>\n"
+        f"🔎 <b>Từ khóa:</b> <code>{safe_query}</code>\n"
         f"👤 <b>Khách hàng:</b> @{safe_user}\n\n"
         f"📝 <b>Nội dung bài đăng:</b>\n<i>\"{safe_text}\"</i>\n\n"
-        f"🤖 <b>Đánh giá:</b> {safe_reason}\n\n"
+        f"🎯 <b>Phân tích:</b> {safe_reason}\n\n"
         f"💬 <b>Câu trả lời soạn sẵn (Chạm nhẹ vào chữ dưới để Copy):</b>\n"
         f"<code>{safe_draft}</code>"
     )
@@ -263,9 +268,9 @@ async def run_single_scan_batch():
     storage = build_cross_domain_storage()
     total_posts_seen = 0
     fresh_30m_count = 0
-    old_skipped_count = 0
+    today_posts_count = 0
     total_leads_found = 0
-    fresh_logs = []
+    hcm_logs = []
     global_seen_codes = set()
 
     async with async_playwright() as p:
@@ -283,7 +288,8 @@ async def run_single_scan_batch():
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         scan_targets = [
-            ("Trang test @tenten.5990", "https://www.threads.net/@tenten.5990")
+            ("Kiểm tra @tenten.5990", "https://www.threads.net/@tenten.5990"),
+            ("Kiểm tra @lynk.bbq", "https://www.threads.net/@lynk.bbq")
         ]
         for q in SEARCH_QUERIES:
             enc = urllib.parse.quote(q)
@@ -293,19 +299,10 @@ async def run_single_scan_batch():
             print(f"\n[*] Đang quét: '{label}'")
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=25000)
-                await page.wait_for_timeout(3000)
-
-                # Bấm vào tab "Gần đây" / "Recent" nếu hiện trên giao diện
-                recent_tab = page.locator('div[role="tab"]:has-text("Gần đây"), div[role="tab"]:has-text("Recent"), a[href*="filter=recent"]')
-                if await recent_tab.count() > 0:
-                    try:
-                        await recent_tab.first.click(timeout=1500)
-                        await page.wait_for_timeout(2000)
-                    except Exception:
-                        pass
+                await page.wait_for_timeout(2800)
 
                 await page.mouse.wheel(0, 700)
-                await page.wait_for_timeout(1200)
+                await page.wait_for_timeout(1000)
 
                 links = await page.locator('a[href*="/post/"]').all()
                 for link in links:
@@ -324,17 +321,13 @@ async def run_single_scan_batch():
                     container = link.locator("xpath=ancestor::div[contains(@data-pressable-container, 'true') or @role='article'][1]")
                     raw_text = await container.inner_text() if await container.count() > 0 else await link.locator("xpath=../../..").inner_text()
 
-                    # CHỈ CHẤP NHẬN BÀI TRONG VÒNG 1 - 30 PHÚT ĐỔ LẠI
-                    is_fresh, time_label = is_within_30_minutes(raw_text)
+                    is_fresh, time_label, age_mins = check_post_freshness(raw_text)
                     if not is_fresh:
-                        old_skipped_count += 1
                         continue
 
-                    fresh_30m_count += 1
-
-                    if is_post_notified(post_code):
-                        fresh_logs.append(f"☑️ @{html.escape(username)} ({html.escape(time_label)}): Đã gửi thông báo khách này ở lượt trước.")
-                        continue
+                    if age_mins <= 30:
+                        fresh_30m_count += 1
+                    today_posts_count += 1
 
                     clean_lines = [
                         line.strip() for line in raw_text.splitlines()
@@ -345,38 +338,39 @@ async def run_single_scan_batch():
                     safe_user = html.escape(username)
                     permalink = f"https://www.threads.net/@{username}/post/{post_code}"
 
-                    evaluation = await analyze_post_with_ai(post_text, username, label)
+                    # Đánh giá Khoanh vùng chặt TP.HCM / Sài Gòn
+                    eval_res = evaluate_hcm_flower_lead(post_text)
 
-                    if (
-                        evaluation.get("is_buyer_seeking_flowers")
-                        and evaluation.get("location_verdict") in ["CONFIRMED_HCM", "LIKELY_HCM"]
-                        and evaluation.get("confidence_score", 0) >= 0.60
-                    ):
+                    if eval_res["is_buyer"]:
+                        if is_post_notified(post_code):
+                            hcm_logs.append(f"☑️ @{safe_user} ({html.escape(time_label)}): Đã báo khách này trước đó.")
+                            continue
                         total_leads_found += 1
-                        draft = evaluation.get("suggested_comment", "")
-                        reason = evaluation.get("reasoning", "")
+                        draft = eval_res["suggested_comment"]
+                        reason = eval_res["reason"]
                         save_lead(post_code, username, post_text, permalink, draft, "NOTIFIED")
                         await send_telegram_alert(username, post_text, permalink, draft, label, reason, time_label)
-                        fresh_logs.append(f"✅ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <b>CHỐT KHÁCH:</b> {html.escape(reason)}")
+                        hcm_logs.append(f"✅ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <b>CHỐT KHÁCH:</b> {html.escape(reason)}")
                     else:
-                        reason = evaluation.get("reasoning", "Không phải khách mua hoa")
-                        save_lead(post_code, username, post_text, permalink, "", "IGNORED")
-                        fresh_logs.append(f"❌ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <i>Loại vì: {html.escape(reason)}</i>")
+                        reason = eval_res["reason"]
+                        # Chỉ ghi vào báo cáo những bài mới (<= 30 phút) hoặc có chữ Sài Gòn/HCM để bạn dễ theo dõi
+                        if age_mins <= 30 or "TP.HCM" not in reason:
+                            if len(hcm_logs) < 10:
+                                hcm_logs.append(f"❌ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <i>Loại vì: {html.escape(reason)}</i>")
 
-                    await asyncio.sleep(0.4)
             except Exception as e:
                 print(f"[!] Lỗi khi quét '{label}': {e}")
 
         await browser.close()
 
     if EVENT_NAME == "workflow_dispatch":
-        log_section = "\n\n".join(fresh_logs[:10]) if fresh_logs else "<i>Trong 30 phút vừa qua chưa có bài viết mới nào chứa bộ từ khóa trên.</i>"
+        log_section = "\n\n".join(hcm_logs[:10]) if hcm_logs else "<i>Chưa có bài mới nào tại khu vực TP.HCM / Sài Gòn.</i>"
         report_msg = (
-            f"⏱️ <b>BÁO CÁO QUÉT BÀI MỚI (TỪ 1 - 30 PHÚT ĐỔ LẠI):</b>\n"
-            f"• <b>Bài mới (1 - 30 phút):</b> {fresh_30m_count} bài\n"
-            f"• <b>Bài cũ (> 30 phút) đã tự động ẩn:</b> {old_skipped_count} bài\n"
-            f"• <b>Khách đặt hoa TP.HCM mới phát hiện:</b> {total_leads_found} khách\n\n"
-            f"📋 <b>Danh sách bài mới đăng trong 30 phút qua:</b>\n\n"
+            f"📍 <b>BÁO CÁO KHOANH VÙNG ĐỘC QUYỀN TP.HCM / SÀI GÒN:</b>\n"
+            f"• <b>Tổng bài lướt qua:</b> {total_posts_seen} bài\n"
+            f"• <b>Bài vừa đăng (1 - 30 phút):</b> {fresh_30m_count} bài\n"
+            f"• <b>Khách đặt hoa TP.HCM phát hiện mới:</b> {total_leads_found} khách\n\n"
+            f"📋 <b>Chi tiết kiểm tra khu vực TP.HCM:</b>\n\n"
             f"{log_section}"
         )
         await send_telegram_debug(report_msg[:3900])
