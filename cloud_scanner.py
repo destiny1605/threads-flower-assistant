@@ -53,9 +53,6 @@ def save_lead(post_id: str, username: str, post_text: str, permalink: str, draft
     conn.commit()
     conn.close()
 
-# =====================================================================
-# DANH SÁCH TỪ KHÓA QUÉT
-# =====================================================================
 SEARCH_QUERIES = [
     "Hoa Tuoi Saigon",
     "cần đặt hoa",
@@ -92,28 +89,54 @@ HCM_SIGNALS = [
     "nhà bè", "hóc môn", "bình chánh", "hồ thị kỷ", "sốp nào", "shop nào", "bông"
 ]
 
+def build_cross_domain_storage() -> str | None:
+    """
+    Tự động nhân bản toàn bộ Cookie đăng nhập từ .instagram.com sang .threads.com và .threads.net
+    Mà không cần người dùng phải mở trang threads.com trên máy tính cá nhân.
+    """
+    if not os.path.exists("threads_session.json"):
+        return None
+    try:
+        with open("threads_session.json", "r", encoding="utf-8") as f:
+            raw = f.read().strip()
+        if not raw:
+            return None
+        data = json.loads(raw)
+        orig_cookies = data.get("cookies", [])
+        new_cookies = list(orig_cookies)
+
+        for c in orig_cookies:
+            dom = c.get("domain", "")
+            if "instagram.com" in dom:
+                for target_dom in [".threads.com", ".threads.net"]:
+                    clone = dict(c)
+                    clone["domain"] = target_dom
+                    new_cookies.append(clone)
+
+        data["cookies"] = new_cookies
+        merged_path = "threads_session_merged.json"
+        with open(merged_path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        print(f"[*] Đã nhân bản {len(orig_cookies)} cookies thành {len(new_cookies)} cookies cho Threads!")
+        return merged_path
+    except Exception as e:
+        print(f"[!] Lỗi xử lý file session: {e}")
+        return "threads_session.json"
+
 def check_post_freshness(raw_text: str) -> tuple[bool, str]:
-    """
-    Kiểm tra thời gian đăng bài:
-    - Chấp nhận bài mới đăng tính bằng giây (s/giây), phút (m/phút), hoặc tối đa 6 giờ (h/giờ) gần nhất.
-    - Loại bỏ ngay các bài từ '1 ngày', '2 ngày', tuần trước, hoặc có ngày tháng cũ (dd/mm/yyyy).
-    """
+    """Chỉ giữ lại bài mới đăng tính bằng giây, phút, hoặc tối đa 6 giờ gần nhất."""
     lines = [l.strip().lower() for l in raw_text.splitlines() if l.strip()]
     for line in lines[:5]:
-        # Loại bài có định dạng ngày tháng cũ như 14/10/2026, 01/10/2026
         if re.search(r"\b\d{1,2}/\d{1,2}(/\d{2,4})?\b", line):
             return False, f"Bài cũ ({line})"
-        # Loại bài tính bằng ngày / tuần / tháng
         if re.search(r"^\d+\s*(ngày|d|tuần|w|tháng|năm)$", line):
             return False, f"Bài cũ ({line})"
-        # Kiểm tra bài tính bằng giờ (chỉ lấy <= 6 giờ gần nhất)
         m_hour = re.match(r"^(\d+)\s*(giờ|h)$", line)
         if m_hour:
             hours = int(m_hour.group(1))
             if hours > 6:
-                return False, f"Bài từ {hours} giờ trước (chỉ lấy <= 6 giờ)"
+                return False, f"Bài từ {hours} giờ trước (> 6h)"
             return True, f"{hours} giờ trước"
-        # Bài vừa đăng tính bằng giây / phút -> Rất mới!
         m_min = re.match(r"^(\d+)\s*(phút|m|giây|s)$", line)
         if m_min or line in ["vừa xong", "now", "just now"]:
             return True, f"Mới đăng ({line})"
@@ -140,55 +163,43 @@ async def analyze_post_with_ai(post_text: str, username: str, query_used: str) -
 
     prompt = f"""
 Bạn là Trợ lý AI săn tìm khách hàng đặt hoa tại TP. Hồ Chí Minh trên mạng xã hội Threads.
-Hãy phân tích bài đăng dưới đây và trả về đúng định dạng JSON (không bọc trong markdown):
+Hãy phân tích bài đăng dưới đây và trả về đúng định dạng JSON:
 
-Thông tin bài đăng:
 - Người đăng: @{username}
 - Từ khóa tìm thấy: {query_used}
 - Có tín hiệu Sài Gòn/HCM: {has_hcm_kw}
 - Nội dung: {post_text}
 
-Quy tắc chấm điểm:
+Quy tắc:
 1. "is_buyer_seeking_flowers": true NẾU người đăng là KHÁCH HÀNG đang hỏi mua hoa, cần đặt hoa gấp, hỏi sốp/shop nào còn thức, shop nào sẵn hoa, tìm chỗ làm hoa mẫu, hỏi ai sale hoa tươi, tìm mua hoa tốt nghiệp/hoa cưới/hoa hồng/hoa ly.
-   "is_buyer_seeking_flowers": false NẾU người đăng là CHỦ SHOP HOA đang rao bán, báo giá (ví dụ '100k', '159k', 'inbox cho tiệm'), xả hoa của tiệm mình, hoặc bài đăng không liên quan mua hoa.
+   "is_buyer_seeking_flowers": false NẾU người đăng là CHỦ SHOP HOA đang rao bán, báo giá ('100k', '159k', 'nhắn sốp'), xả hoa của tiệm mình.
 2. "location_verdict": "CONFIRMED_HCM" hoặc "LIKELY_HCM" nếu bài viết/chủ đề có chữ Saigon/Sài Gòn/HCM/Gò Vấp/Quận..., HOẶC bài viết không nhắc tới tỉnh khác và mang văn phong tìm hoa tại Sài Gòn ('sốp nào còn thức', 'cần đặt hoa gấp'...). Ngược lại là "OUTSIDE".
 3. "confidence_score": số từ 0.0 đến 1.0.
-4. "reasoning": giải thích ngắn gọn 1 câu bằng tiếng Việt vì sao chọn hoặc loại.
-5. "suggested_comment": câu bình luận phản hồi ấm áp, nhiệt tình kiểu Sài Gòn (dưới 240 ký tự), đúng nhu cầu của khách, không kèm link hay số điện thoại.
-
-Trả về JSON mẫu:
-{{"is_buyer_seeking_flowers": true, "location_verdict": "CONFIRMED_HCM", "confidence_score": 0.95, "reasoning": "Khách tìm đặt hoa gấp sáng mai tại Sài Gòn", "suggested_comment": "Dạ tụi mình vẫn còn thức nhận đơn hoa gấp cho sáng mai ở Sài Gòn nè bạn ơi, bạn nhắn tụi mình mẫu hoa bạn thích nha!"}}
+4. "reasoning": giải thích ngắn gọn 1 câu tiếng Việt.
+5. "suggested_comment": câu bình luận ấm áp kiểu Sài Gòn (dưới 240 ký tự), không kèm link hay SĐT.
 """
-
-    # Gọi trực tiếp REST API chuẩn của Gemini (tương thích cả AI Studio Key và Vertex Express Key AQ.A...)
     api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={OPENAI_API_KEY}"
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {
-            "temperature": 0.2,
-            "responseMimeType": "application/json"
-        }
+        "generationConfig": {"temperature": 0.2, "responseMimeType": "application/json"}
     }
-
     try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=18.0) as client:
             resp = await client.post(api_url, json=payload)
             if resp.status_code != 200:
-                # Dự phòng tự động chấm bằng Bộ quy tắc thông minh nếu API Key bị giới hạn
-                return fallback_rule_evaluation(post_text, query_used, has_hcm_kw)
+                return fallback_rule_evaluation(post_text, has_hcm_kw)
             data = resp.json()
             raw_json = data["candidates"][0]["content"]["parts"][0]["text"]
             return json.loads(raw_json)
     except Exception:
-        return fallback_rule_evaluation(post_text, query_used, has_hcm_kw)
+        return fallback_rule_evaluation(post_text, has_hcm_kw)
 
-def fallback_rule_evaluation(post_text: str, query_used: str, has_hcm_kw: bool) -> dict:
-    """Bộ lọc thông minh dự phòng: Không bao giờ bị 'Lỗi phân tích' ngay cả khi mạng/API chập chờn."""
+def fallback_rule_evaluation(post_text: str, has_hcm_kw: bool) -> dict:
     t = post_text.lower()
     buyer_patterns = [
         "cần đặt hoa", "cần hoa gấp", "sốp nào", "shop nào", "tiệm nào",
         "có ai", "cho mình hỏi", "cho em hỏi", "tìm shop", "tìm tiệm",
-        "rcm", "recommend", "còn thức không", "chỗ nào bán", "mua ở đâu"
+        "rcm", "recommend", "còn thức không", "chỗ nào bán", "mua ở đâu", "đặt hoa gấp"
     ]
     seller_patterns = ["100k", "150k", "159k", "200k", "ib ngay", "nhắn sốp nha", "sẵn ạ", "freeship"]
 
@@ -200,16 +211,14 @@ def fallback_rule_evaluation(post_text: str, query_used: str, has_hcm_kw: bool) 
             "reasoning": "Bài đăng bán hàng của shop hoa",
             "suggested_comment": ""
         }
-
     if any(bp in t for bp in buyer_patterns):
         return {
             "is_buyer_seeking_flowers": True,
             "location_verdict": "CONFIRMED_HCM" if has_hcm_kw else "LIKELY_HCM",
             "confidence_score": 0.85,
-            "reasoning": "Khách đang hỏi tìm nơi đặt hoa (Phát hiện qua từ khóa câu hỏi)",
-            "suggested_comment": "Dạ tiệm tụi mình ở Sài Gòn vẫn đang nhận đơn và có sẵn nhiều mẫu hoa tươi xinh lắm ạ. Bạn ghé trang tụi mình hoặc nhắn tụi mình tư vấn liền nha! 🌸"
+            "reasoning": "Khách đang hỏi tìm nơi đặt hoa",
+            "suggested_comment": "Dạ tiệm tụi mình ở Sài Gòn vẫn đang thức nhận đơn hoa gấp và có sẵn nhiều mẫu hoa tươi xinh lắm ạ. Bạn nhắn tụi mình tư vấn liền nha! 🌸"
         }
-
     return {
         "is_buyer_seeking_flowers": False,
         "location_verdict": "UNKNOWN",
@@ -228,44 +237,29 @@ async def send_telegram_alert(username: str, post_text: str, permalink: str, dra
         f"💬 <b>Câu trả lời soạn sẵn (Chạm nhẹ vào chữ dưới để Copy):</b>\n"
         f"<code>{draft_comment}</code>"
     )
-    keyboard = {
-        "inline_keyboard": [
-            [{"text": "📱 Mở bài này trong App Threads để dán Comment", "url": permalink}]
-        ]
-    }
+    keyboard = {"inline_keyboard": [[{"text": "📱 Mở bài này trong App Threads để dán Comment", "url": permalink}]]}
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
             f"{TELEGRAM_API_BASE}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": msg,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True,
-                "reply_markup": keyboard
-            }
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True, "reply_markup": keyboard}
         )
 
 async def send_telegram_debug(text: str):
     async with httpx.AsyncClient(timeout=15.0) as client:
         await client.post(
             f"{TELEGRAM_API_BASE}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True
-            }
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         )
 
 async def run_single_scan_batch():
     init_db()
-    storage = "threads_session.json" if os.path.exists("threads_session.json") else None
+    storage = build_cross_domain_storage()
     total_posts_seen = 0
     fresh_posts_count = 0
     total_leads_found = 0
     detailed_logs = []
     global_seen_codes = set()
-    is_logged_in = False
+    sso_status = "Chưa rõ"
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -279,27 +273,33 @@ async def run_single_scan_batch():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
+        await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # Kiểm tra xem phiên đăng nhập trên threads.com đã có hiệu lực thực sự chưa
+        # BƯỚC QUAN TRỌNG: Dùng IP sạch của GitHub để tự động bấm "Continue with Instagram"
         try:
-            await page.goto("https://www.threads.com/", wait_until="domcontentloaded", timeout=25000)
-            await page.wait_for_timeout(3000)
-            login_links = await page.locator('a[href*="/login"]').count()
-            is_logged_in = (login_links == 0)
-            print(f"[*] Trạng thái đăng nhập Threads.com: {'ĐÃ ĐĂNG NHẬP ✅' if is_logged_in else 'CHƯA ĐĂNG NHẬP ⚠️ (Cần lấy cookie trên threads.com)'}")
+            await page.goto("https://www.threads.net/login", wait_until="domcontentloaded", timeout=25000)
+            await page.wait_for_timeout(3500)
+            # Tìm nút đăng nhập qua Instagram
+            insta_btn = page.locator('div[role="button"]:has-text("Instagram"), button:has-text("Instagram"), a:has-text("Instagram")')
+            if await insta_btn.count() > 0:
+                await insta_btn.first.click(timeout=5000)
+                await page.wait_for_timeout(6000)
+                sso_status = "Đã kích hoạt SSO qua Instagram"
+            else:
+                sso_status = "Đã nạp thẳng Cookie đa miền (.threads.com & .threads.net)"
         except Exception as e:
-            print(f"[*] Kiểm tra trang chủ: {e}")
+            sso_status = f"Dùng Cookie nhân bản ({str(e)[:30]})"
 
         for query in SEARCH_QUERIES:
             print(f"\n[*] Đang quét từ khóa: '{query}'")
             encoded_q = urllib.parse.quote(query)
-            # filter=recent ép Threads hiển thị bài mới đăng theo thời gian thực
-            url = f"https://www.threads.com/search?q={encoded_q}&serp_type=default&filter=recent"
+            # Quét trên threads.net với tham số filter=recent
+            url = f"https://www.threads.net/search?q={encoded_q}&serp_type=default&filter=recent"
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 await page.wait_for_timeout(3500)
 
-                # Bấm trực tiếp vào tab "Gần đây" / "Recent" trên giao diện nếu có
+                # Nếu thấy nút tab "Recent" / "Gần đây" thì click để ép hiển thị bài mới đăng
                 recent_tab = page.locator('div[role="tab"]:has-text("Gần đây"), div[role="tab"]:has-text("Recent"), a[href*="filter=recent"]')
                 if await recent_tab.count() > 0:
                     try:
@@ -331,7 +331,6 @@ async def run_single_scan_batch():
                     container = link.locator("xpath=ancestor::div[contains(@data-pressable-container, 'true') or @role='article'][1]")
                     raw_text = await container.inner_text() if await container.count() > 0 else await link.locator("xpath=../../..").inner_text()
 
-                    # BỘ LỌC THỜI GIAN: Loại bỏ ngay bài từ nhiều ngày trước hoặc > 6 giờ trước
                     is_fresh, time_label = check_post_freshness(raw_text)
                     clean_lines = [
                         line.strip() for line in raw_text.splitlines()
@@ -339,11 +338,11 @@ async def run_single_scan_batch():
                     ]
                     post_text = " | ".join(clean_lines)[:500]
                     short_preview = post_text.replace("<", "").replace(">", "")[:85]
-                    permalink = f"https://www.threads.com/@{username}/post/{post_code}"
+                    permalink = f"https://www.threads.net/@{username}/post/{post_code}"
 
                     if not is_fresh:
-                        if len(detailed_logs) < 10:
-                            detailed_logs.append(f"⏳ <a href='{permalink}'>@{username}</a>: \"{short_preview}...\"\n   ↳ <i>Bỏ qua vì: {time_label}</i>")
+                        if len(detailed_logs) < 8:
+                            detailed_logs.append(f"⏳ <a href='{permalink}'>@{username}</a>: \"{short_preview}...\"\n   ↳ <i>Loại ngay vì: {time_label}</i>")
                         continue
 
                     fresh_posts_count += 1
@@ -366,19 +365,18 @@ async def run_single_scan_batch():
                         if len(detailed_logs) < 12:
                             detailed_logs.append(f"❌ <a href='{permalink}'>@{username}</a> (<b>{time_label}</b>): \"{short_preview}...\"\n   ↳ <i>Loại vì: {reason}</i>")
 
-                    await asyncio.sleep(0.8)
+                    await asyncio.sleep(0.5)
             except Exception as e:
                 print(f"[!] Lỗi khi quét '{query}': {e}")
 
         await browser.close()
 
     if EVENT_NAME == "workflow_dispatch":
-        auth_status = "✅ Đã đăng nhập (Mở khóa bài mới nhất)" if is_logged_in else "⚠️ Chưa nhận phiên đăng nhập trên threads.com (Đang chỉ thấy bài nổi tiếng cũ)"
         log_section = "\n\n".join(detailed_logs[:10]) if detailed_logs else "<i>Không có bài viết nào.</i>"
         report_msg = (
             f"📊 <b>BÁO CÁO QUÉT BÀI MỚI NHẤT (<= 6 GIỜ):</b>\n"
-            f"• <b>Trạng thái Cookie Threads:</b> {auth_status}\n"
-            f"• <b>Tổng bài lướt qua:</b> {total_posts_seen} bài (Trong đó <b>{fresh_posts_count} bài mới đăng</b>)\n"
+            f"• <b>Đồng bộ phiên:</b> {sso_status}\n"
+            f"• <b>Tổng bài lướt qua:</b> {total_posts_seen} bài (Trong đó <b>{fresh_posts_count} bài mới <= 6h</b>)\n"
             f"• <b>Khách đặt hoa TP.HCM chốt được:</b> {total_leads_found} khách\n\n"
             f"📋 <b>Chi tiết xử lý:</b>\n\n"
             f"{log_section}"
