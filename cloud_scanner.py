@@ -18,6 +18,7 @@ EVENT_NAME = os.getenv("GITHUB_EVENT_NAME", "manual")
 TELEGRAM_API_BASE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 DB_PATH = "threads_flower_leads.db"
+MAX_AGE_MINUTES = 30  # Chỉ lấy bài viết mới từ 1 phút đến tối đa 30 phút đổ lại
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -33,8 +34,6 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Xóa toàn bộ các bài từng bị đánh dấu IGNORED do lỗi ở các lần chạy thử trước
-    cursor.execute("DELETE FROM leads WHERE status != 'NOTIFIED'")
     conn.commit()
     conn.close()
 
@@ -56,7 +55,6 @@ def save_lead(post_id: str, username: str, post_text: str, permalink: str, draft
     conn.commit()
     conn.close()
 
-# Đưa các cụm từ sát với nhu cầu đặt hoa gấp lên đầu danh sách
 SEARCH_QUERIES = [
     "cần đặt hoa gấp",
     "sốp nào còn thức",
@@ -121,24 +119,33 @@ def build_cross_domain_storage() -> str | None:
         print(f"[!] Lỗi xử lý session: {e}")
         return "threads_session.json"
 
-def check_post_freshness(raw_text: str) -> tuple[bool, str]:
-    """Lọc bỏ bài cũ nhiều ngày trước hoặc từ năm/tháng trước."""
+def is_within_30_minutes(raw_text: str) -> tuple[bool, str]:
+    """
+    Bộ lọc Nghiêm ngặt: CHỈ CHẤP NHẬN bài viết vừa đăng từ 1 giây đến tối đa 30 phút trước.
+    Loại bỏ 100% bài tính bằng giờ (h/giờ), ngày (d/ngày), tuần, hoặc ngày tháng (dd/mm/yyyy).
+    """
     lines = [l.strip().lower() for l in raw_text.splitlines() if l.strip()]
     for line in lines[:6]:
+        # 1. Nếu là vừa xong hoặc tính bằng giây -> ĐẠT NGAY
+        if line in ["vừa xong", "now", "just now"] or re.match(r"^(\d+)\s*(giây|s)$", line):
+            return True, f"Vừa đăng ({line})"
+
+        # 2. Nếu tính bằng phút -> Chỉ nhận từ 1 đến 30 phút
+        m_min = re.match(r"^(\d+)\s*(phút|m)$", line)
+        if m_min:
+            mins = int(m_min.group(1))
+            if mins <= MAX_AGE_MINUTES:
+                return True, f"{mins} phút trước"
+            else:
+                return False, f"Quá 30 phút ({mins} phút trước)"
+
+        # 3. Nếu tính bằng giờ, ngày, tuần, hoặc ngày/tháng/năm -> LOẠI NGAY LẬP TỨC
+        if re.match(r"^(\d+)\s*(giờ|h|ngày|d|tuần|w|tháng|năm)$", line):
+            return False, f"Bài cũ ({line})"
         if re.search(r"\b\d{1,2}/\d{1,2}(/\d{2,4})?\b", line):
             return False, f"Bài cũ ({line})"
-        if re.search(r"^\d+\s*(ngày|d|tuần|w|tháng|năm)$", line):
-            return False, f"Bài cũ ({line})"
-        m_hour = re.match(r"^(\d+)\s*(giờ|h)$", line)
-        if m_hour:
-            hours = int(m_hour.group(1))
-            if hours > 18:
-                return False, f"Bài từ {hours} giờ trước"
-            return True, f"{hours} giờ trước"
-        m_min = re.match(r"^(\d+)\s*(phút|m|giây|s)$", line)
-        if m_min or line in ["vừa xong", "now", "just now"]:
-            return True, f"Mới đăng ({line})"
-    return True, "Mới đây"
+
+    return False, "Không rõ mốc thời gian mới"
 
 def fallback_rule_evaluation(post_text: str, has_hcm_kw: bool) -> dict:
     t = post_text.lower()
@@ -165,8 +172,8 @@ def fallback_rule_evaluation(post_text: str, has_hcm_kw: bool) -> dict:
             "is_buyer_seeking_flowers": True,
             "location_verdict": "CONFIRMED_HCM" if has_hcm_kw else "LIKELY_HCM",
             "confidence_score": 0.90,
-            "reasoning": "Khách đang hỏi tìm shop đặt hoa",
-            "suggested_comment": "Dạ tiệm tụi mình ở Sài Gòn vẫn đang thức nhận đơn hoa gấp và có sẵn nhiều mẫu hoa tươi xinh lắm ạ. Bạn nhắn tụi mình tư vấn liền nha! 🌸"
+            "reasoning": "Khách đang hỏi tìm shop đặt hoa mới tức thì",
+            "suggested_comment": "Dạ tiệm tụi mình ở Sài Gòn vẫn đang trực nhận đơn hoa gấp và có sẵn nhiều mẫu hoa tươi xinh lắm ạ. Bạn nhắn tụi mình tư vấn liền nha! 🌸"
         }
 
     return {
@@ -239,33 +246,26 @@ async def send_telegram_alert(username: str, post_text: str, permalink: str, dra
     )
     keyboard = {"inline_keyboard": [[{"text": "📱 Mở bài này trong App Threads để dán Comment", "url": permalink}]]}
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.post(
+        await client.post(
             f"{TELEGRAM_API_BASE}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": True, "reply_markup": keyboard}
         )
-        print(f"   [Telegram Alert Status]: {r.status_code}")
 
 async def send_telegram_debug(text: str):
     async with httpx.AsyncClient(timeout=15.0) as client:
-        r = await client.post(
+        await client.post(
             f"{TELEGRAM_API_BASE}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True}
         )
-        if r.status_code != 200:
-            print(f"[!] Lỗi gửi Telegram Debug ({r.status_code}): {r.text}")
-            # Gửi lại dạng văn bản thường nếu lỗi HTML
-            await client.post(
-                f"{TELEGRAM_API_BASE}/sendMessage",
-                json={"chat_id": TELEGRAM_CHAT_ID, "text": re.sub(r"<[^>]+>", "", text)}
-            )
 
 async def run_single_scan_batch():
     init_db()
     storage = build_cross_domain_storage()
     total_posts_seen = 0
-    fresh_posts_count = 0
+    fresh_30m_count = 0
+    old_skipped_count = 0
     total_leads_found = 0
-    detailed_logs = []
+    fresh_logs = []
     global_seen_codes = set()
 
     async with async_playwright() as p:
@@ -282,9 +282,8 @@ async def run_single_scan_batch():
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # Danh sách URL quét: Kết hợp cả trang cá nhân test (@tenten.5990) + Tìm kiếm Recent
         scan_targets = [
-            ("Kiểm tra bài test @tenten.5990", "https://www.threads.net/@tenten.5990")
+            ("Trang test @tenten.5990", "https://www.threads.net/@tenten.5990")
         ]
         for q in SEARCH_QUERIES:
             enc = urllib.parse.quote(q)
@@ -296,12 +295,19 @@ async def run_single_scan_batch():
                 await page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(3000)
 
+                # Bấm vào tab "Gần đây" / "Recent" nếu hiện trên giao diện
+                recent_tab = page.locator('div[role="tab"]:has-text("Gần đây"), div[role="tab"]:has-text("Recent"), a[href*="filter=recent"]')
+                if await recent_tab.count() > 0:
+                    try:
+                        await recent_tab.first.click(timeout=1500)
+                        await page.wait_for_timeout(2000)
+                    except Exception:
+                        pass
+
                 await page.mouse.wheel(0, 700)
                 await page.wait_for_timeout(1200)
 
                 links = await page.locator('a[href*="/post/"]').all()
-                print(f" -> Thấy {len(links)} link bài viết")
-
                 for link in links:
                     href = await link.get_attribute("href")
                     if not href:
@@ -315,28 +321,30 @@ async def run_single_scan_batch():
                     global_seen_codes.add(post_code)
                     total_posts_seen += 1
 
-                    if is_post_notified(post_code):
-                        continue
-
                     container = link.locator("xpath=ancestor::div[contains(@data-pressable-container, 'true') or @role='article'][1]")
                     raw_text = await container.inner_text() if await container.count() > 0 else await link.locator("xpath=../../..").inner_text()
 
-                    is_fresh, time_label = check_post_freshness(raw_text)
+                    # CHỈ CHẤP NHẬN BÀI TRONG VÒNG 1 - 30 PHÚT ĐỔ LẠI
+                    is_fresh, time_label = is_within_30_minutes(raw_text)
+                    if not is_fresh:
+                        old_skipped_count += 1
+                        continue
+
+                    fresh_30m_count += 1
+
+                    if is_post_notified(post_code):
+                        fresh_logs.append(f"☑️ @{html.escape(username)} ({html.escape(time_label)}): Đã gửi thông báo khách này ở lượt trước.")
+                        continue
+
                     clean_lines = [
                         line.strip() for line in raw_text.splitlines()
                         if len(line.strip()) >= 2 and line.strip() not in [username, "Translate", "Dịch"]
                     ]
                     post_text = " | ".join(clean_lines)[:450]
-                    short_preview = html.escape(post_text[:80])
+                    short_preview = html.escape(post_text[:85])
                     safe_user = html.escape(username)
                     permalink = f"https://www.threads.net/@{username}/post/{post_code}"
 
-                    if not is_fresh:
-                        if len(detailed_logs) < 8:
-                            detailed_logs.append(f"⏳ @{safe_user}: \"{short_preview}...\"\n   ↳ Bỏ qua ngay: {html.escape(time_label)}")
-                        continue
-
-                    fresh_posts_count += 1
                     evaluation = await analyze_post_with_ai(post_text, username, label)
 
                     if (
@@ -349,12 +357,11 @@ async def run_single_scan_batch():
                         reason = evaluation.get("reasoning", "")
                         save_lead(post_code, username, post_text, permalink, draft, "NOTIFIED")
                         await send_telegram_alert(username, post_text, permalink, draft, label, reason, time_label)
-                        detailed_logs.append(f"✅ @{safe_user} ({html.escape(time_label)}): \"{short_preview}...\"\n   ↳ CHỐT KHÁCH: {html.escape(reason)}")
+                        fresh_logs.append(f"✅ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <b>CHỐT KHÁCH:</b> {html.escape(reason)}")
                     else:
                         reason = evaluation.get("reasoning", "Không phải khách mua hoa")
                         save_lead(post_code, username, post_text, permalink, "", "IGNORED")
-                        if len(detailed_logs) < 12:
-                            detailed_logs.append(f"❌ @{safe_user} ({html.escape(time_label)}): \"{short_preview}...\"\n   ↳ Loại vì: {html.escape(reason)}")
+                        fresh_logs.append(f"❌ @{safe_user} (<b>{html.escape(time_label)}</b>): \"{short_preview}...\"\n   ↳ <i>Loại vì: {html.escape(reason)}</i>")
 
                     await asyncio.sleep(0.4)
             except Exception as e:
@@ -363,12 +370,13 @@ async def run_single_scan_batch():
         await browser.close()
 
     if EVENT_NAME == "workflow_dispatch":
-        log_section = "\n\n".join(detailed_logs[:10]) if detailed_logs else "Không có bài viết nào."
+        log_section = "\n\n".join(fresh_logs[:10]) if fresh_logs else "<i>Trong 30 phút vừa qua chưa có bài viết mới nào chứa bộ từ khóa trên.</i>"
         report_msg = (
-            f"📊 <b>BÁO CÁO QUÉT MỚI NHẤT (LƯỢT CHẠY THỰC TẾ):</b>\n"
-            f"• <b>Tổng bài lướt qua:</b> {total_posts_seen} bài (Có <b>{fresh_posts_count} bài mới</b>)\n"
-            f"• <b>Khách đặt hoa TP.HCM chốt được:</b> {total_leads_found} khách\n\n"
-            f"📋 <b>Chi tiết 10 bài đầu tiên vừa xử lý:</b>\n\n"
+            f"⏱️ <b>BÁO CÁO QUÉT BÀI MỚI (TỪ 1 - 30 PHÚT ĐỔ LẠI):</b>\n"
+            f"• <b>Bài mới (1 - 30 phút):</b> {fresh_30m_count} bài\n"
+            f"• <b>Bài cũ (> 30 phút) đã tự động ẩn:</b> {old_skipped_count} bài\n"
+            f"• <b>Khách đặt hoa TP.HCM mới phát hiện:</b> {total_leads_found} khách\n\n"
+            f"📋 <b>Danh sách bài mới đăng trong 30 phút qua:</b>\n\n"
             f"{log_section}"
         )
         await send_telegram_debug(report_msg[:3900])
