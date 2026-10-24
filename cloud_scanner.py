@@ -59,22 +59,22 @@ def save_lead(post_id: str, username: str, post_text: str, permalink: str, draft
 # =====================================================================
 SEARCH_QUERIES = [
     "Hoa Tuoi Saigon",
-    "đặt hoa sài gòn",
-    "đặt hoa hcm",
-    "cần hoa gấp tối nay",
-    "cần hoa gấp hcm",
-    "hoa tốt nghiệp",
+    "cần hoa chiều nay",
+    "đặt hoa tphcm",
+    "cần hoa tối nay",
+    "tìm hoa gần",
+    "hoa bó sẵn",
     "hoa tốt nghiệp hcm",
-    "shop nào sẵn hoa sài gòn",
-    "sốp nào sẵn hoa sài gòn",
-    "sẵn hoa sài gòn",
+    "tìm hoa tươi",
+    "sốp nào sẵn hoa sg",
+    "shop hoa tươi",
     "sẵn hoa hcm",
-    "hoa gấp sài gòn",
+    "hoa gấp",
     "sale hoa sài gòn",
     "hoa cưới sài gòn",
     "hoa hồng sài gòn",
     "hoa ly sài gòn",
-    "rcm shop hoa sài gòn",
+    "tha thiết tìm hoa",
     "tìm tiệm hoa sài gòn"
 ]
 
