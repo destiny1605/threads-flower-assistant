@@ -5,12 +5,23 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
+# 1. Chống kẹt hàng đợi 24/7: Nếu lượt cũ bị treo, tự động hủy lượt cũ để chạy lượt mới
+concurrency:
+  group: flower-scanner-hcm-group
+  cancel-in-progress: true
+
 permissions:
   contents: write
+
+env:
+  # 2. Xóa bỏ hoàn toàn cảnh báo Node.js 20 deprecated trên GitHub Actions
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   scan:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,6 +30,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -33,19 +45,49 @@ jobs:
             echo "$THREADS_SESSION_JSON" > threads_session.json
           fi
 
-      - name: Run Flower Scanner
+      # 3. Cơ chế Tự phục hồi (Self-Healing): Tự động thử lại tối đa 3 lần nếu mạng/Playwright chập chờn
+      - name: Run Flower Scanner (With Auto-Retry)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        run: python cloud_scanner.py
+        run: |
+          for attempt in 1 2 3; do
+            echo ">>> [Lần thử $attempt/3] Đang chạy trình quét khách đặt hoa..."
+            if python cloud_scanner.py; then
+              echo "✅ Quét thành công ở lần thử $attempt!"
+              exit 0
+            fi
+            echo "⚠️ Lần thử $attempt gặp sự cố, đợi 15 giây trước khi tự động chạy lại..."
+            sleep 15
+          done
+          echo "❌ Cả 3 lần thử đều thất bại!"
+          exit 1
 
-      - name: Save Processed Leads DB
+      # 4. Tự động chống xung đột Git khi lưu Database 24/7
+      - name: Save Processed Leads DB Safely
+        if: always()
         run: |
           git config user.name "flower-bot"
           git config user.email "bot@users.noreply.github.com"
           if [ -f threads_flower_leads.db ]; then
             git add threads_flower_leads.db
-            git diff --staged --quiet || git commit -m "Update processed leads DB"
-            git push
+            if ! git diff --staged --quiet; then
+              git commit -m "Auto-update processed leads DB [skip ci]"
+              git pull --rebase origin main || true
+              git push origin main || true
+            fi
           fi
+
+      # 5. Giám sát 24/7: Tự động bắn cảnh báo về Telegram nếu Workflow bị lỗi
+      - name: Send Telegram Alert on Workflow Failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d parse_mode="HTML" \
+            -d text="⚠️ <b>CẢNH BÁO GIÁM SÁT 24/7:</b> Lượt quét GitHub Actions vừa gặp sự cố sau 3 lần tự thử lại. Hệ thống sẽ tự động chạy lại ở chu kỳ 30 phút tiếp theo.%0A🔗 <a href='${RUN_URL}'>Xem chi tiết nhật ký lỗi tại đây</a>"
