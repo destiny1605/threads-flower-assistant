@@ -18,7 +18,7 @@ env:
 jobs:
   scan:
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
@@ -42,7 +42,7 @@ jobs:
             echo "$THREADS_SESSION_JSON" > threads_session.json
           fi
 
-      - name: Run Flower Scanner (With Auto-Retry)
+      - name: Run Flower Scanner (2 Rounds Per Run)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -50,9 +50,12 @@ jobs:
         run: |
           SUCCESS=0
           for attempt in 1 2 3; do
-            echo ">>> [Lần thử $attempt/3] Đang chạy trình quét khách đặt hoa..."
+            echo ">>> [Lần thử $attempt/3] Bắt đầu quét Hiệp 1..."
             if python cloud_scanner.py; then
-              echo "✅ Quét thành công ở lần thử $attempt!"
+              echo "✅ Hiệp 1 hoàn tất! Nghỉ 7 phút (420s) trước khi quét tiếp Hiệp 2..."
+              sleep 420
+              echo ">>> Bắt đầu quét Hiệp 2..."
+              python cloud_scanner.py || true
               SUCCESS=1
               break
             fi
@@ -88,4 +91,4 @@ jobs:
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             -d chat_id="${TELEGRAM_CHAT_ID}" \
             -d parse_mode="HTML" \
-            -d text="⚠️ <b>CẢNH BÁO GIÁM SÁT 24/7:</b> Lượt quét vừa gặp sự cố sau 3 lần thử lại. Hệ thống sẽ tự động chạy lại ở chu kỳ 10 phút tiếp theo.%0A🔗 <a href='${RUN_URL}'>Xem chi tiết nhật ký tại đây</a>"
+            -d text="⚠️ <b>CẢNH BÁO GIÁM SÁT 24/7:</b> Lượt quét vừa gặp sự cố sau 3 lần thử lại. Hệ thống sẽ tự động chạy lại ở chu kỳ tiếp theo.%0A🔗 <a href='${RUN_URL}'>Xem chi tiết nhật ký tại đây</a>"
