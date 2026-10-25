@@ -55,9 +55,6 @@ def save_lead(post_id: str, username: str, post_text: str, permalink: str, draft
     conn.commit()
     conn.close()
 
-# =====================================================================
-# 1. CÁC TOPIC TAG TRỌNG ĐIỂM (Đưa Flowers of threads & Hoa Tuoi Saigon lên đầu)
-# =====================================================================
 PRIORITY_TAGS = [
     "Flowers of threads",
     "Hoa Tuoi Saigon",
@@ -69,9 +66,6 @@ PRIORITY_TAGS = [
     "tiemhoasaigon"
 ]
 
-# =====================================================================
-# 2. TỪ KHÓA TÌM KIẾM TRỰC TIẾP
-# =====================================================================
 SEARCH_QUERIES = [
     "cần hoa tươi",
     "tìm gấp hoa",
@@ -94,7 +88,6 @@ SEARCH_QUERIES = [
     "hoa hồng"
 ]
 
-# Loại trừ các tỉnh thành ngoài TP.HCM
 OTHER_PROVINCES_BLACKLIST = [
     "hà nội", "hanoi", "hn", "cầu giấy", "đống đa", "hoàn kiếm", "tây hồ", "thanh xuân",
     "hai bà trưng", "long biên", "hà đông", "ba đình", "cầu diễn", "mỹ đình", "gia lâm",
@@ -102,7 +95,6 @@ OTHER_PROVINCES_BLACKLIST = [
     "huế", "quy nhơn", "vinh", "nghệ an", "thanh hóa", "bắc ninh", "hải dương", "quảng ninh"
 ]
 
-# Các tài khoản của tiệm bạn
 OWN_ACCOUNTS = [
     "tiemhoaconmeo_meoflowers",
     "troly.tiemhoaconmeo_meoflowers",
@@ -110,7 +102,6 @@ OWN_ACCOUNTS = [
     "tenten.5990"
 ]
 
-# Loại trừ Shop bán hàng, Bài chéo follow VÀ Bài tìm việc / tuyển dụng sale hoa
 SELLER_AND_JOB_BLACKLIST = [
     "nhận đặt hoa", "bên mình nhận", "tuyển thợ cắm hoa", "sỉ hoa", "tuyển nhân viên",
     "tuyển sale", "đang tuyển", "tuyển dụng", "tuyển ctv", "tìm việc", "xin việc",
@@ -131,6 +122,11 @@ HCM_SIGNALS = [
 ]
 
 def build_cross_domain_storage() -> str | None:
+    """
+    Hàm xử lý Cookie chống lỗi JSONDecodeError tuyệt đối:
+    - Chấp nhận cả JSON đầy đủ HOẶC chỉ 1 chuỗi mã sessionid thô!
+    - Nếu JSON bị lỗi hoặc dư ký tự, tự động trích xuất mã sessionid bằng Regex.
+    """
     if not os.path.exists("threads_session.json"):
         return None
     try:
@@ -138,45 +134,88 @@ def build_cross_domain_storage() -> str | None:
             raw = f.read().strip()
         if not raw:
             return None
-        data = json.loads(raw)
-        orig_cookies = data.get("cookies", [])
-        new_cookies = list(orig_cookies)
-        for c in orig_cookies:
-            dom = c.get("domain", "")
-            if "instagram.com" in dom:
-                for target_dom in [".threads.com", ".threads.net"]:
-                    clone = dict(c)
-                    clone["domain"] = target_dom
-                    new_cookies.append(clone)
-        data["cookies"] = new_cookies
+
+        session_val = None
+        data = None
+
+        # Thử đọc JSON chuẩn trước
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # Nếu không phải JSON chuẩn (do dán mã sessionid thô hoặc JSON bị thừa chữ):
+            # Tìm kiếm chuỗi sessionid bên trong văn bản
+            m = re.search(r'"value"\s*:\s*"([^"]+)"', raw)
+            if m:
+                session_val = m.group(1).strip()
+            elif not raw.startswith("{") and len(raw) > 10:
+                # Người dùng dán trực tiếp mã sessionid thô
+                session_val = raw.splitlines()[0].strip().strip('"').strip("'")
+
+        if data and isinstance(data, dict) and "cookies" in data:
+            orig_cookies = data.get("cookies", [])
+            new_cookies = list(orig_cookies)
+            for c in orig_cookies:
+                dom = c.get("domain", "")
+                if "instagram.com" in dom or "threads" in dom:
+                    for target_dom in [".threads.com", ".threads.net", ".instagram.com"]:
+                        clone = dict(c)
+                        clone["domain"] = target_dom
+                        new_cookies.append(clone)
+            data["cookies"] = new_cookies
+        elif session_val:
+            print("[*] Đã tự động nhận diện mã sessionid và đóng gói JSON chuẩn!")
+            data = {
+                "cookies": [
+                    {
+                        "name": "sessionid",
+                        "value": session_val,
+                        "domain": ".threads.com",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "None"
+                    },
+                    {
+                        "name": "sessionid",
+                        "value": session_val,
+                        "domain": ".threads.net",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "None"
+                    },
+                    {
+                        "name": "sessionid",
+                        "value": session_val,
+                        "domain": ".instagram.com",
+                        "path": "/",
+                        "httpOnly": True,
+                        "secure": True,
+                        "sameSite": "None"
+                    }
+                ],
+                "origins": []
+            }
+        else:
+            print("[!] THREADS_SESSION_JSON không hợp lệ, tạm chạy chế độ không đăng nhập.")
+            return None
+
         merged_path = "threads_session_merged.json"
         with open(merged_path, "w", encoding="utf-8") as f:
             json.dump(data, f)
         return merged_path
     except Exception as e:
-        print(f"[!] Lỗi xử lý session: {e}")
-        try:
-            with open("threads_session.json", "r", encoding="utf-8") as f:
-                json.load(f)
-            return "threads_session.json"
-        except Exception:
-            print("[!] threads_session.json không phải JSON hợp lệ, bỏ qua session.")
-            return None
+        print(f"[!] Bỏ qua lỗi session ({e}), chạy chế độ mặc định.")
+        return None
 
 def extract_main_post_only(raw_text: str, author_username: str) -> str:
-    """
-    Cắt bỏ phần bình luận trả lời của các shop bên dưới (ví dụ bình luận của tiemhoaconmeo_meoflowers)
-    để chỉ lấy đúng nội dung bài đăng gốc của khách hàng.
-    """
     lines = [l.strip() for l in raw_text.splitlines() if l.strip()]
     main_lines = []
     for line in lines:
-        # Nếu bắt gặp tên tài khoản của tiệm hoặc dòng bình luận trả lời bên dưới -> Dừng đọc ngay
         if line.lower() in OWN_ACCOUNTS or "tham khảo sốp" in line.lower():
             break
         if line not in [author_username, "Translate", "Dịch", "Cuộc trò chuyện đầu tiên"]:
             main_lines.append(line)
-        # Chỉ lấy tối đa 6 dòng đầu tiên của bài gốc (tránh đọc xuống phần comment của người khác)
         if len(main_lines) >= 6:
             break
     return " | ".join(main_lines)[:400]
@@ -215,7 +254,6 @@ def evaluate_post(post_text: str, username: str, source_label: str) -> dict:
 
     t = post_text.lower()
 
-    # 1. Phải có ngữ cảnh liên quan đến Hoa
     flower_keywords = [
         "hoa", "bó", "bông", "lẵng", "giỏ", "tulip", "lily", "ly", "cẩm tú cầu", "hướng dương",
         "tiệm", "shop", "sốp", "florist", "hoatuoisaigon", "flowers of threads"
@@ -223,12 +261,10 @@ def evaluate_post(post_text: str, username: str, source_label: str) -> dict:
     if not any(fk in t for fk in flower_keywords) and "hoa" not in source_label.lower() and "flower" not in source_label.lower():
         return {"is_buyer": False, "reason": "Không liên quan đến hoa tươi"}
 
-    # 2. Loại trừ ngay nếu bài viết ở Hà Nội hoặc tỉnh thành khác
     for prov in OTHER_PROVINCES_BLACKLIST:
         if re.search(rf"\b{re.escape(prov)}\b", t):
             return {"is_buyer": False, "reason": f"Khách ở tỉnh khác ({prov})"}
 
-    # 3. Loại trừ ngay bài bán hàng, chéo follow hoặc tuyển dụng/xin việc
     for bad_kw in SELLER_AND_JOB_BLACKLIST:
         if bad_kw in t:
             return {"is_buyer": False, "reason": f"Shop bán hàng / Tuyển dụng ('{bad_kw}')"}
@@ -236,7 +272,6 @@ def evaluate_post(post_text: str, username: str, source_label: str) -> dict:
     if ("📍" in t or "•" in t) and not any(q in t for q in ["tìm", "cần", "xin", "hỏi", "không", "?"]):
         return {"is_buyer": False, "reason": "Bài đăng bán mẫu hoa có sẵn của shop"}
 
-    # 4. Nhận diện đầy đủ các mẫu câu Khách hàng tìm mua hoa thực tế
     buyer_signals = [
         "em cần hoa", "cần hoa tươi", "bó dạng", "gần khu vực", "khu vực gò vấp",
         "tìm chỗ bán", "tìm bó hoa", "tìm hoa", "tìm gấp hoa", "tìm shop", "tìm tiệm",
@@ -274,8 +309,8 @@ def evaluate_post(post_text: str, username: str, source_label: str) -> dict:
         "is_buyer": True,
         "reason": f"Khách mua hoa [{loc_info}] - Khớp tín hiệu: '{matched_signal}'",
         "suggested_comment": (
-            "Dạ bạn tham khảo Tiệm Hoa Con Mèo (@tiemhoaconmeo_meoflowers) ở Quận 1 Sài Gòn nha! Sốp chuyên hoa ly và nhận làm mẫu theo đúng ngân sách từ 300k+, giá mềm và có giao hoả tốc liền khắp HCM ạ 🌸, "
-            "giá mềm và giao liền khắp các quận HCM ạ! 🌸"
+            "Dạ bạn tham khảo Tiệm Hoa Con Mèo (@tiemhoaconmeo_meoflowers) ở Quận 1 Sài Gòn nha! "
+            "Sốp chuyên hoa ly và nhận thiết kế mẫu theo đúng ngân sách từ 200k-300k+, giá mềm và giao hoả tốc liền khắp HCM ạ 🌸"
         )
     }
 
@@ -339,7 +374,6 @@ async def scan_page_stream(page, source_label: str, scroll_rounds: int, global_s
 
                 fresh_120m_count += 1
 
-                # Tách riêng bài đăng gốc của khách, bỏ qua các bình luận bên dưới
                 post_text = extract_main_post_only(raw_text, username)
                 short_preview = html.escape(post_text[:90])
                 safe_user = html.escape(username)
@@ -382,39 +416,39 @@ async def run_single_scan_batch():
             headless=True,
             args=["--disable-blink-features=AutomationControlled"]
         )
-        context = await browser.new_context(
-            storage_state=storage,
-            locale="vi-VN",
-            timezone_id="Asia/Ho_Chi_Minh",
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        )
+        context_kwargs = {
+            "locale": "vi-VN",
+            "timezone_id": "Asia/Ho_Chi_Minh",
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        }
+        if storage:
+            context_kwargs["storage_state"] = storage
+
+        context = await browser.new_context(**context_kwargs)
         page = await context.new_page()
         await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # 1. RÀ SOÁT BẢNG TIN TRANG CHỦ & BÀI MẪU @ppppemmm
         home_targets = [
-            ("Bảng tin Trang chủ", "https://www.threads.net/"),
-            ("Tag Flowers of threads (@ppppemmm)", "https://www.threads.net/@ppppemmm")
+            ("Bảng tin Trang chủ (threads.com)", "https://www.threads.com/"),
+            ("Bảng tin Trang chủ (threads.net)", "https://www.threads.net/")
         ]
         for label, url in home_targets:
             print(f"\n[*] Đang rà: {label}")
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(3000)
-                rounds = 15 if "Trang chủ" in label else 2
-                s, f, l = await scan_page_stream(page, label, rounds, global_seen_codes, logs)
+                s, f, l = await scan_page_stream(page, label, 15, global_seen_codes, logs)
                 total_seen += s
                 total_fresh_120m += f
                 total_leads += l
             except Exception as e:
                 print(f"[!] Lỗi quét {label}: {e}")
 
-        # 2. RÀ SOÁT CHUYÊN SÂU CÁC TOPIC TAG (Flowers of threads, Hoa Tuoi Saigon, hoatuoisaigon...)
         for tag in PRIORITY_TAGS:
             enc_tag = urllib.parse.quote(tag)
             tag_urls = [
-                (f"Tag [{tag}] (Gần đây)", f"https://www.threads.net/search?q={enc_tag}&serp_type=recent&filter=recent"),
-                (f"Tag [{tag}] (Hàng đầu)", f"https://www.threads.net/search?q={enc_tag}&serp_type=default")
+                (f"Tag [{tag}] (Gần đây)", f"https://www.threads.com/search?q={enc_tag}&serp_type=recent&filter=recent"),
+                (f"Tag [{tag}] (Hàng đầu)", f"https://www.threads.com/search?q={enc_tag}&serp_type=default")
             ]
             for label, url in tag_urls:
                 print(f"\n[*] Đang rà {label}")
@@ -428,11 +462,10 @@ async def run_single_scan_batch():
                 except Exception as e:
                     print(f"[!] Lỗi quét {label}: {e}")
 
-        # 3. RÀ SOÁT TỪ KHÓA MỞ RỘNG
         for q in SEARCH_QUERIES:
             print(f"\n[*] Đang rà từ khóa: '{q}'")
             enc = urllib.parse.quote(q)
-            url = f"https://www.threads.net/search?q={enc}&serp_type=recent&filter=recent"
+            url = f"https://www.threads.com/search?q={enc}&serp_type=recent&filter=recent"
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=25000)
                 await page.wait_for_timeout(2500)
@@ -445,11 +478,12 @@ async def run_single_scan_batch():
 
         await browser.close()
 
-    # LUÔN GỬI BÁO CÁO TÓM TẮT VỀ TELEGRAM KỂ CẢ KHI TẮT LAPTOP (CHẠY TỰ ĐỘNG SCHEDULE)
     log_section = "\n\n".join(logs[:10]) if logs else "<i>Trong hiệp quét này chưa có bài mới nào thêm.</i>"
     mode_label = "TỰ ĐỘNG 24/7" if EVENT_NAME == "schedule" else "CHẠY THỦ CÔNG"
+    session_status = "Đã đăng nhập Cookie" if storage else "Chưa có Cookie chuẩn"
     report_msg = (
         f"📡 <b>BÁO CÁO RÀ SOÁT ({mode_label} | 1 - 120 PHÚT):</b>\n"
+        f"• <b>Trạng thái phiên:</b> {session_status}\n"
         f"• <b>Tổng số bài vừa lướt:</b> {total_seen} bài\n"
         f"• <b>Bài mới (1 - 120 phút):</b> {total_fresh_120m} bài\n"
         f"• <b>Khách tìm mua hoa mới:</b> {total_leads} khách\n\n"
