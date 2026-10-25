@@ -155,7 +155,13 @@ def build_cross_domain_storage() -> str | None:
         return merged_path
     except Exception as e:
         print(f"[!] Lỗi xử lý session: {e}")
-        return "threads_session.json"
+        try:
+            with open("threads_session.json", "r", encoding="utf-8") as f:
+                json.load(f)
+            return "threads_session.json"
+        except Exception:
+            print("[!] threads_session.json không phải JSON hợp lệ, bỏ qua session.")
+            return None
 
 def extract_main_post_only(raw_text: str, author_username: str) -> str:
     """
