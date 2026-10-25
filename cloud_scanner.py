@@ -268,7 +268,7 @@ def evaluate_post(post_text: str, username: str, source_label: str) -> dict:
         "is_buyer": True,
         "reason": f"Khách mua hoa [{loc_info}] - Khớp tín hiệu: '{matched_signal}'",
         "suggested_comment": (
-            "Dạ bạn tham khảo sốp tụi mình ở Sài Gòn (Q1) nha, tụi mình chuyên hoa ly và nhận thiết kế mẫu theo đúng ngân sách, "
+            "Dạ bạn tham khảo Tiệm Hoa Con Mèo (@tiemhoaconmeo_meoflowers) ở Quận 1 Sài Gòn nha! Sốp chuyên hoa ly và nhận làm mẫu theo đúng ngân sách từ 300k+, giá mềm và có giao hoả tốc liền khắp HCM ạ 🌸, "
             "giá mềm và giao liền khắp các quận HCM ạ! 🌸"
         )
     }
