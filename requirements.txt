@@ -1,0 +1,5 @@
+httpx
+openai
+pydantic
+python-dotenv
+playwright
