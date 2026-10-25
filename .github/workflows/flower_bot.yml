@@ -34,7 +34,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install httpx openai pydantic python-dotenv playwright
+          pip install -r requirements.txt
           playwright install chromium --with-deps
 
       - name: Restore Threads Session
